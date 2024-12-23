@@ -1,6 +1,16 @@
 import {format_date, get_mdx_content} from "../../../lib/mdxUtils";
 import {CustomMDX} from "../../../components/CustomMDX";
 import Image from "next/image";
+import fs from "fs"
+import path from "path"
+
+export async function generateStaticParams() {
+    const post_filenames = fs.readdirSync("public/markdown/posts/").filter((file) => path.extname(file) === '.mdx')
+
+    return post_filenames.map((filename) => ({
+        slug: filename.replace(".mdx", ""),
+    }))
+}
 
 export default async function BlogPost({
                                        params,
@@ -17,7 +27,7 @@ export default async function BlogPost({
                 <h1 id={"title"} className={"lg:text-6xl md:text-5xl text-4xl font-extralight"}>{frontmatter.title}</h1>
                 <span id={"publish date"} className={"md:text-lg text-base text-neutral-400"}>{formatted_date}</span>
             </div>
-            <Image width={1920} height={1080} loading={"lazy"}
+            <Image width={1920} height={1080} loading={"lazy"} quality={100}
                    style={{width: "100%", height:"auto"}}
                    className={"aspect-auto rounded-xl border border-border-dark my-12 "} src={frontmatter.image!} alt={"blog image"}/>
             <div className={"lg:p-10 md:p-8 md:border-[1px] md:border-border-dark md:bg-[#050505] rounded-lg flex flex-col relative w-full"}>
