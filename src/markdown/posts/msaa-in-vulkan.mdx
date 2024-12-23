@@ -1,0 +1,41 @@
+import BlogImage from "../../components/BlogImage";
+import ExternalLink from "../../components/ExternalLink";
+
+---
+title: 'MSAA in Vulkan'
+publishedAt: '2024-12-18'
+description: 'Implementing MSAA in Vulkan for improved rendering quality in my game engine.'
+image: '/images/posts/msaa-main.png'
+---
+
+Recently, I added Multi-Sampled Anti-Aliasing (MSAA) to my Vulkan Renderer in my game engine. I posted a tutorial for this on YouTube which you can visit <ExternalLink url={"https://www.youtube.com/watch?v=jJzJvuM4nZw&t=198s"} title={"here"}/>. For this post, however, I mostly want to demo the high-level idea behind the process and list some takeaways from my experience.
+
+
+To start off, I’m using Vulkan 1.3’s Dynamic Rendering feature which makes my implementation a bit different from the traditional render pass approach. For the purposes of this post, however, that implementation detail is not super important.
+
+#### What and Why
+When considering adding any anti-aliasing to a renderer, the reason is typically to counteract that monitors have a specific resolution. The rasterizer in a GPU is what’s responsible for taking your mathematically represented scene, and assigning your computed colors to individual pixels on a screen. This gives you, the human, an image that’s “close enough” to your scene. The more pixels you can fit onto a monitor, the closer you can get to the real image, as you’re sampling the original scene at a higher frequency.
+
+Imagine drawing a smooth curve on graph paper, and filling in only the squares which touch the curve. The smaller and more dense the squares are on the paper, the closer your filled in set of squares will look to the original curve.
+
+We can't just add more pixels to the monitors sitting on our desk, however, and higher resolution screens take more effort for your GPU to fill. This is where MSAA comes in. It's a way to run the fragment shader only once (for most cases) per pixel, and apply that computed color only to sample points which actually cover the fragment. The final pixel color is simply the average of the colors weighted by how many samples they occur in.
+
+<BlogImage src={"/images/posts/single-vs-msaa.png"} alt={"Comparison of single vs multi-sampled color output"} desc={"Comparison of single vs multi-sampled color output"}/>
+
+#### High Level Implementation
+
+With MSAA, you need to create an extra image which is scaled by the MSAA samples you decide to go with. for instance, if you’re using 4 samples per pixel, and you’re rendering to a 1080 x 1920 resolution image, you need to create another image exactly 4 times as large to hold the samples. You then define your original image as the “resolve” image. it's called this because that larger multi-sampled image will be averaged down and “resolved” into that standard resolution image. For instance, if you’re rendering directly to a swapchain image, this would be the resolve image.
+
+You also need to create a larger depth image with the same scaling factor, however, there is no resolve image associated with it because the depth buffer will be used directly by that large multi-sampled image.
+
+The most important thing to note is that for these large multi-sampled buffers, main memory does not really need them, and its best to set their usage as “transient” and their storage operation to “don't care” to keep their memory within the device. You should think of these buffers as scratch space really, and set the resolve image if you need to extract results from the buffers, as is the case for the single-sampled image you will be presenting.
+
+You can read more about this in <ExternalLink url={"https://docs.vulkan.org/samples/latest/samples/performance/msaa/README.html"} title={"Vulkan's documentation"}/>
+
+#### Results
+
+Here is a roof section of the same scene as above except that the background is white to better visualize aliasing effects. You'll notice that there's less stair-stepping between the edges of the roof and plants with the background when MSAA is enabled.
+
+This smoothing really helps to visually increase perceived pixel density at edges and doesn't cost much, assuming you're not reading back multi-sampled buffers into main memory.
+
+<BlogImage src={"/images/posts/msaa-compare.png"} alt={"Single sampled (left) vs. 4x MSAA (right)"} desc={"Single sampled (left) vs. 4x MSAA (right)"}/>
