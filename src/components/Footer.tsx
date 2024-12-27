@@ -1,7 +1,7 @@
 "use client"
 
 import Divider from "./Divider";
-import {ExternalLink, ExternalLinkProps} from "./ExternalLink";
+import ExternalLink,{ ExternalLinkProps} from "./ExternalLink";
 
 const links:ExternalLinkProps[] = [
     {title:"GitHub", url:"https://github.com/imalexlee"},

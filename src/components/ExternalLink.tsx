@@ -5,7 +5,7 @@ export type ExternalLinkProps = {
     url: string;
 };
 
-export function ExternalLink(props: ExternalLinkProps){
+export default function ExternalLink(props: ExternalLinkProps){
    return(
        <a
             target={"_blank"}

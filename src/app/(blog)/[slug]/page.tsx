@@ -30,7 +30,7 @@ export default async function BlogPost({
             <Image width={1920} height={1080} loading={"lazy"} quality={100}
                    style={{width: "100%", height:"auto"}}
                    className={"aspect-auto rounded-xl border border-border-dark my-12 "} src={frontmatter.image!} alt={"blog image"}/>
-            <div className={"lg:p-10 md:p-8 md:border-[1px] md:border-border-dark md:bg-[#050505] rounded-lg flex flex-col relative w-full"}>
+            <div className={"lg:p-10 md:p-8 md:border md:border-border-dark md:bg-[#050505] rounded-lg flex flex-col relative w-full"}>
                 <CustomMDX source={content}/>
             </div>
         </div>

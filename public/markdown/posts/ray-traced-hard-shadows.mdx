@@ -1,0 +1,77 @@
+import BlogImage from "../../components/BlogImage";
+import ExternalLink from "../../components/ExternalLink";
+import CodeBlock from "../../../src/components/CodeBlock";
+
+---
+title: 'Ray Traced Hard Shadows'
+publishedAt: '2024-12-24'
+description: 'Quick glance into hard shadows in my engine and some Vulkan-specific advice.'
+image: '/images/posts/hard-shadows-main.png'
+---
+
+Rasterized shadows kinda suck.
+
+Typical techniques such as shadow mapping causes aliasing due to projection and resolution differences between the shadow texture and screen. Cascaded shadow mapping helps, but is more complicated, takes up more memory, and still does not fully eliminate aliasing on it’s own. This is unfortunate since so much of what our eyes can understand about a scene is related to shadowing.
+
+There are anti-aliasing strategies for shadow maps, but other artifacts such as biasing issues and accurate penumbra regions still make them (and their variants) less than ideal for visibly accurate shadows.
+
+#### How Ray-Traced Shadows Help
+
+Fortunately, ray-tracing provides pixel-perfect hard shadows while also being efficient enough for most GPU’s with RT cores to handle. The reason for this is that with ray tracing, shadows are calculated in screen space, eliminating any possible aliasing and perspective artifacts. Additionally, understanding how ray-traced hard shadows work is extremely simple.
+
+1. A ray is cast out from a point on an object towards a light source(s)
+2. If the ray hits something, it’s in shadow
+3. If the ray doesn’t hit anything, it’s being lit
+
+Soft shadows aren’t as simple however, and one popular way of achieving them is to shoot a handful of ray samples from the object in a disc pattern towards light sources, scaling how much in shadow the object is by how many of these rays hit something or not.
+
+For now though, I’ll just focus on hard shadows.
+
+#### The Easy Part
+
+In Vulkan, there are two main ways to use ray tracing, Ray Tracing Pipelines and Ray Queries.
+
+In my renderer, I went with Ray Queries as they’re much simpler to implement as you can generate and query the state of rays directly from an existing shader. This is in contrast to Ray Tracing Pipelines which require writing a handful of dedicated shaders and more Vulkan boilerplate. While Ray Tracing Pipelines can be more efficient, firing off a shadow ray is a great use case for Ray Queries.
+
+
+In glsl, here is how you could do a simple Ray Query within a fragment shader to tell if you're in shadow or not. The passed in Acceleration Structure is a TLAS handle (which I'll mention soon), which is given to the shader through a descriptor.
+<CodeBlock code={
+    `rayQueryEXT rq;
+float infinity = 1.0 / 0;
+rayQueryInitializeEXT(rq, accel_struct, gl_RayFlagsTerminateOnFirstHitEXT, 0xFF, vert_pos.xyz, 0.01, light_dir, infinity);
+
+rayQueryProceedEXT(rq);
+
+if (rayQueryGetIntersectionTypeEXT(rq, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+    // in shadow
+} else {
+    // not in shadow
+}`
+} lang={"glsl"}/>
+
+#### The Hard Part
+
+When ray tracing, techniques exist to speed up rendering such as creating data structures that are able to be queried for ray hits faster than simply iterating through every object in a scene.
+
+In Vulkan, you need to generate these, known as “acceleration structures” in order to use ray tracing. These come in two flavors, top level acceleration structures (TLAS) and bottom level acceleration structures (BLAS).
+
+A BLAS is given geometry, like the vertices of a model, or an axis aligned bounding box (AABB). This physical representation of your geometry is then arranged in an implementation-specific format within the BLAS so that rays can efficiently calculate whether they hit something and what exactly was hit.
+
+A TLAS just stores references to one or more BLAS’s along with some metadata like a transform matrix. This is so that if your geometry moves, you can just update the transform matrix in the TLAS so that ray’s know where things are. Otherwise, you would have to rebuild the entire BLAS any time something moves which is really expensive.
+
+Conceptually this is really simple, but I found that the API difficult. The heavy use of unions (sometimes inconsistently), and the Russian doll level of nesting between the handfuls of new initialization structures felt more overwhelming than usual. Obviously I did it, but it wasn’t fun. This isn’t abnormal for Vulkan, however, and I can’t say I’d make a better API.
+
+You can find my implementation in my engines GitHub repository if you want to look at a reference.
+
+#### Things to consider
+
+Having highly overlapping BLAS’s can be inefficient but may be necessary if many smaller meshes will be moving as in the case for animated characters. For larger, static meshes, its better to create a BLAS with one geometry instance instead.
+
+In Nvidia Nsight, you can actually visualize your acceleration structures and as you can see, I have a lot of overlapping BLAS's. This is because I made every sub-mesh of the object (like the wheels and windows) their own geometry instance when building the BLAS's.
+
+
+<BlogImage src={"/images/posts/rt-bounding-boxes.png"} alt={"Overlapping BLAS's visualized in Nvidia Nsight"} desc={"Overlapping BLAS's visualized in Nvidia Nsight"}/>
+
+Also, When building these acceleration structures, more space is allocated than is usually necessary for the final BLAS. This is where compaction comes into play. It exists to trim down the memory for these rather large structures. You can find more info on how to do this in the Vulkan docs.
+
+Lastly, Before you waste a bunch of time like me and try to use the host-side acceleration structure API, check if your driver actually supports it. I didn’t and found out that virtually no driver had this implemented yet.

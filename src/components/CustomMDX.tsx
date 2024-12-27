@@ -3,7 +3,8 @@ import React from 'react'
 import Divider from "./Divider";
 //import Image from "next/image";
 import BlogImage from "./BlogImage"
-import {ExternalLink} from "./ExternalLink";
+import ExternalLink from "./ExternalLink";
+import CodeBlock from "./CodeBlock";
 
 function h1() {
     const component = (props: React.ComponentProps<"h1">) => (
@@ -112,7 +113,7 @@ const intrinsic_components = {
     div:div(),
 }
 
-const custom_components = {BlogImage, ExternalLink}
+const custom_components = {BlogImage, ExternalLink, CodeBlock}
 
 export function CustomMDX(props:MDXRemoteProps) {
     return (
