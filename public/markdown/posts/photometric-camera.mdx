@@ -1,0 +1,206 @@
+import BlogImage from "../../components/BlogImage";
+import ExternalLink from "../../components/ExternalLink";
+import CodeBlock from "../../../src/components/CodeBlock";
+
+---
+title: 'Photometric Camera'
+publishedAt: '2025-05-13'
+description: 'Using Photometry to Render Real-World Light Sources Consistently'
+image: '/images/posts/photometric-camera/photometric-sponza.png'
+---
+
+Representing lights in a physically-based 3D renderer should ideally be consistent with real light sources. The sun should be tremendously brighter than a light bulb. and a close light bulb should be tremendously brighter than a distant star. In software, we can really choose any arbitrary way to represent this relationship, but choosing real-world lighting units can make things easier.
+
+As for which lighting units to choose, there are two primary routes we can take: radiometric units or photometric units. Radiometric units represent actual optical radiation measurements that include not only visible light, but other wavelength ranges such as ultraviolet and infrared. Photometric units are simply radiometric units scaled by the sensitivity of the human eye for particular wavelengths.
+
+Here are the most relevant radiometric units with their analogous photometric units.
+
+<BlogImage src={"/images/posts/photometric-camera/unit-comparison.png"} alt={"Comparison of Radiometric and Photometric units"} desc={"Comparison of Radiometric and Photometric units"}/>
+
+Radiant and Luminous Flux represent power, with the Watt and the Lumen being the unit for both respectively.
+
+Radiant and Luminous Intensity represent power per unit solid angle, with luminous intensity using the Candela as its standard unit. Two lights with the same lumens can have vastly different luminous intensities at different angles. For example, a laser produces very bright light in a single direction, whereas a light bulb with the same lumen output will distribute light over many more directions.
+
+Irradiance and Illuminance represent power per unit area, with illuminance using Lux as its unit. Illuminance represents the lumens incident on a surface.
+
+Lastly, radiance and luminance represent power per unit solid angle per unit area, with luminance using the Nit as its unit. Luminance, for instance, represents how much luminous power is detected when looking at a surface from a particular viewing angle, and corresponds to perceived brightness.
+
+### Converting radiometric to photometric units
+
+This scaling factor between radiometric and photometric units is represented by the CIE Photometric Curve.
+
+<BlogImage src={"/images/posts/photometric-camera/cie-curve.png"} alt={"CIE Photometric Curve"} desc={"CIE Photometric Curve"}/>
+
+You can see that the human eye is most sensitive to light with a 555nm wavelength, which appears green to us. This means that the *luminous efficacy* at this wavelength, is 100%, with longer and shorter wavelengths dropping in efficacy along a bell shape.
+
+If we wanted to accurately use radiometric quantities in our non-spectral renderer, we would have to provide the efficacy value of the light source to be able to represent its appearance. It isn’t convenient, however, to always provide both intensity and efficacy for each light. Furthermore, we’re typically only concerned with the perceptual effects of a light on a scene.
+
+<BlogImage src={"/images/posts/photometric-camera/light-comparison.png"} alt={"Two Lights With Similar Lumen Output"} desc={"Two Lights With Similar Lumen Output"}/>
+
+So that leaves us with our second option, photometric units, which CAN be represented as their real-world reference values since they are already measured with the photometric curve in mind. For instance, Two lights can produce the same amount of lumens with different combinations of wattage and efficacy.
+
+From a graphics perspective, since we’re primarily worried about appearance, it’s more convenient to only worry about perceptual units like the lumen instead of wattage and efficacy. This is why I decided to go with photometric units, but before we can actually use them, we have to think of how to set up our virtual camera to interpret them.
+
+<BlogImage src={"/images/posts/photometric-camera/luminance-ranges.png"} alt={"Range of World and Camera Luminance Ranges"} desc={"Range of World and Camera Luminance Ranges"}/>
+
+The problem is that the range of luminance values in real life is much larger than what a camera can accurately represent. This means that we have to normalize the total range of measured luminance to the camera’s range through a process called *exposing*.
+
+We first find what’s called, the *Exposure Value* (EV), which is based on three variables: the camera’s aperture size, shutter speed, and ISO.
+
+<BlogImage src={"/images/posts/photometric-camera/ev-diagram.png"} alt={"EV diagram. Frostbite 2014"} desc={"EV diagram. Frostbite 2014"}/>
+
+Aperture is the size of the opening allowing light to the sensor, and is represented in f-stops. It changes not only how much light reaches the sensor, but also depth of field. In that regard, a larger aperture corresponds to a more out-of-focus image in areas farther from the focal point.
+
+Next, Shutter speed also dictates how much light reaches the camera sensor, by exposing it for longer or shorter amounts of time. This affects motion blur, which is when a moving object appears streaked or blurred across an image due to different points on the sensor capturing the object at different times.
+
+Lastly ISO values represent how sensitive a camera sensor is to light. Doubling the ISO will double the brightness of a photo, with the side effect being that higher ISO usually corresponds to a more grainy image.
+
+One EV is typically defined for an ISO of 100, and combinations of aperture size and shutter speed can produce the exact same EV, with tradeoffs between motion blur and depth of field.
+
+For instance, with an ISO of 100, a 1/500th second shutter speed with an f/1.4 aperture represents 10EV. A 1/4th second shutter speed and a f/16 aperture also represents 10EV, but has a less dramatic depth of field, with higher motion blur compared to the prior configuration.
+
+If you used the same parameters with an ISO of 200 instead, everything would shift up 1 EV. For an ISO of 400, you would shift up 2 EV, and so on.
+
+Once we decide on an EV, we need to derive the *photometric exposure* from it, which actually represents the luminance that reaches the camera, in lux-seconds.
+
+<BlogImage src={"/images/posts/photometric-camera/exposure-equation.png"} alt={"Exposure equation"} desc={"Exposure equation"}/>
+
+Photometric exposure, H, is defined as such, where t is shutter speed, N is aperture, L is incoming luminance, and q is based on the transmittance and vignetting factor of the lens. A value of 0.65 is typically used for q.
+
+There are a few different ways to relate photometric exposure to sensitivity, but we’ll use *Saturation Based Sensitivity (SBS),* defined as the maximum exposure possible that does not lead to clipped or bloomed camera output.
+
+<BlogImage src={"/images/posts/photometric-camera/sbs-equation.png"} alt={"SBS equation"} desc={"SBS equation"}/>
+
+SBS is defined as such, where S is our ISO, and 78 is a factor chosen so that the exposure settings for a standard light meter represents an 18% reflective surface, or middle grey, with a 12.7% saturation. This is derived from dividing 18 by the square root of 2, giving the image a half-stop of head room to deal with specular reflections which could be much brighter than a perfectly white surface.
+
+Taking our original definition of H, we can solve for L to find the maximum luminance which would saturate our cameras sensor.
+
+And, assuming we’re using an ISO of 100, we can rewrite N^2/t as 2 raised to our EV, since EV is defined as log_2(N^2/t). Additionally, we can replace S and q since we already know their values.
+
+<BlogImage src={"/images/posts/photometric-camera/max-luminance-equation.png"} alt={"Max luminance equation"} desc={"Max luminance equation"}/>
+
+So overall, the maximum luminance for saturating the sensor can be defined as 1.2 times 2 raised to our EV, for an ISO of 100.
+
+We can divide our real-world luminance values by this maximum luminance to normalize our values to the range that our image can actually represent.
+
+<BlogImage src={"/images/posts/photometric-camera/meadow.png"} alt={"Grass meadow"} desc={"Grass meadow"}/>
+
+Now let’s actually get outside, and find some real-world illuminance values to compare against.
+
+It’s currently April in the Southern United States where I live, and I came to this open meadow at noon on a partially cloudy day.
+
+<BlogImage src={"/images/posts/photometric-camera/lux-meter.png"} alt={"Lux meter"} desc={"Lux meter"}/>
+
+I also brought a cheap lux meter to get some readings on the maximum recorded illuminance on the ground.
+
+I was reading a max lux of about 75 killolux, or 75,000 lux, which is reasonable for a day like today.
+
+Lets go back home and see how we can put all of this together in our shader.
+<CodeBlock code={`float compute_EV100(float aperture, float shutter_time, float ISO) {
+    // EV number is defined as :
+    // 2^ EV_s = N ^2 / t and EV_s = EV_100 + log2 ( S /100)
+    // This gives
+    // EV_s = log2 ( N ^2 / t )
+    // EV_100 + log2 ( S /100) = log2 ( N ^2 / t )
+    // EV_100 = log2 ( N ^2 / t ) - log2 ( S /100)
+    // EV_100 = log2 ( N ^2 / t . 100 / S )
+    return log2(((aperture * aperture) / shutter_time) * (100 / ISO));
+}
+
+float convert_EV100_to_exposure(float EV100) {
+    // Compute the maximum luminance possible with H_sbs sensitivity
+    // maxLum = 78 / ( S * q ) * N ^2 / t
+    // = 78 / ( S * q ) * 2^ EV_100
+    // = 78 / (100 * 0.65) * 2^ EV_100
+    // = 1.2 * 2^ EV
+    // Reference : http :// en . wikipedia . org / wiki / Film_speed
+    return 1.2f * pow(2.f, EV100);
+}
+ `
+} lang={"glsl"}/>
+
+These are the two most important functions for us. The math here is equivalent to what I talked about earlier, but reduced for efficiency, as found in Frostbites paper on moving their engine to being physically-based.
+
+<CodeBlock code={`float aperture = 16.f;
+float shutter_time = 1 / 60.f;
+float iso = 100;
+
+float EV100 = compute_EV100(aperture, shutter_time, iso);
+float exposure = convert_EV100_to_exposure(EV100);
+
+vec3 sun_color = vec3(1);
+vec3 sun_illuminance = sun_color * 75000;
+
+vec3 direct_luminance = material * sun_illuminance * n_dot_l;
+
+float ambient_ratio = 0.04;
+vec3 ambient_illuminance =  sun_illuminance * ambient_ratio;
+
+vec3 ambient_contribution = ambient_illuminance * albedo.rgb * occlusion;
+
+float up_factor = dot(normal, (vec3(0, 1, 0)));
+up_factor = (up_factor + 1.f) * 0.375f + 0.25f;// convert from [-1,1] to [0.25,1] range
+ambient_contribution *= up_factor;
+
+vec3 final_color = (direct_luminance * shadow) + ambient_contribution + emissive;
+
+final_color /= exposure;
+
+final_color = ACES_filmic(final_color);
+
+out_color = vec4(final_color, albedo.a);
+ `
+} lang={"glsl"}/>
+Further down, I set my camera settings to have an aperture of f/16, shutter speed of 1/60th of a second, and an ISO of 100 to obtain a 14 EV, which is typical for a partially cloudy day.
+
+It’s important to mention that because I haven’t implemented depth of field, or motion blur, the combination of shutter speed and aperture settings are arbitrary in my case, as long as they generate the same EV.
+
+continuing, I set the illuminance coming from the sun and the sky to 75,000 lux, which is what we got outside with our lux meter. We apply this to our direct and ambient lighting.
+
+I’m also applying an “up factor” to my ambient lighting to make it look a bit less flat considering I haven’t implemented any global illumination or ambient occlusion. This slightly scales down the ambient light brightness of surfaces not facing up.
+
+Afterwards, I apply shadows from direct lighting, before dividing by our exposure. remember, this value describes the maximum luminance possible in the scene, so this division maps our scene luminance to our cameras displayable range.
+
+And Finally, I apply ACES filmic tone mapping before outputting the color.
+
+<BlogImage src={"/images/posts/photometric-camera/field-scan.png"} alt={"3D drone scan of a field"} desc={"3D drone scan of a field"}/>
+
+Let’s first take a look at this 3D drone scan of a grass field.
+
+With 14 EV, the field looks pretty reasonable for the lighting conditions, but we can take it a step further.
+
+<BlogImage src={"/images/posts/photometric-camera/phone-exposure.png"} alt={"EV settings from iPhone 14"} desc={"EV settings from iPhone 14"}/>
+
+On my phone, I can see the exposure parameters it used when taking this picture of the meadow that day that I recorded illuminance. There’s an ISO of 80, aperture of f/1.78, and a shutter speed of 1/8929’ths of a second.
+
+<CodeBlock code={`float aperture = 1.78f;
+float shutter_time = 1 / 11161.f;
+float iso = 100;
+ `
+} lang={"glsl"}/>
+
+I’ll plug these values into my shader, except I’ll scale the time that the shutter is open by 80% of its current value since I want to keep my ISO at 100, not 80. The EV produced, however, is the same.
+
+<BlogImage src={"/images/posts/photometric-camera/iphone-render-comparison.png"} alt={"Phone photo (left) vs render (right)"} desc={"Phone photo (left) vs render (right)"}/>
+
+Comparing my render to the picture I took, you can see that besides some differences in the color of the grass, and possibly different tone mapping curves, the lighting looks pretty consistent.
+
+<BlogImage src={"/images/posts/photometric-camera/underexposed-sponza.png"} alt={"Underexposed Sponza"} desc={"Underexposed Sponza"}/>
+
+Now, lets look at the Sponza asset with the same settings. It’s pretty dark, which makes sense considering much of our scene is in shadow, and the grey bricks do absorb a good bit of light.
+
+The problem is that there’s just less total luminance in our scene for the camera to pick up with our current EV settings.
+
+So, just like a real camera, we can increase our exposure by dropping our EV to something like 12, by setting shutter speed to 1/60’th of a second, and aperture to f/8.
+
+<BlogImage src={"/images/posts/photometric-camera/exposed-sponza.png"} alt={"Properly exposed Sponza"} desc={"Properly exposed Sponza"}/>
+
+Now the scene looks properly exposed.
+
+Many camera’s have the ability to perform auto-exposure specifically for this purpose. It’s much more convenient to not have to dial in EV settings whenever you move between areas of different lighting conditions.
+
+For now though, I’ll leave auto-exposure, along with depth of field and motion blur as some possible next steps in this project.
+
+### Relevant Links
+
+<ExternalLink title={"Frostbite PBR Paper"} url={"https://seblagarde.wordpress.com/wp-content/uploads/2015/07/course_notes_moving_frostbite_to_pbr_v32.pdf"}/>
